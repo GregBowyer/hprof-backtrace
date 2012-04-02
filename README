@@ -1,0 +1,40 @@
+This is a stupid, very simply C program that is designed to be capable of
+reading a JVM heap dump (the hotspot hprof flavor of heapdump).
+
+This is intended to pull out the stacktraces of a heapdump for inclusion in
+automated error emails.
+
+The goals for this program are:
+
+    - Be as portable as C99 will allow, that is lots of tricks for making high
+      performance file reading (looking at you mmap()) are skipped simply
+      because the aim is to have this run on any platform with a resonably sane
+      C99 compiler
+
+    - Within the limits of goal 1, be as fast as possible
+
+    - Use as little memory as possible, this program is intended to be run after
+      a heap dump, for my use at my current $DAYJOB this means that the java
+      process is already 12Gb heap, with 18-20Gb of wired process memory. In
+      such an environment using as little memory as possible is important since
+      the crashing JVM is likly taking at least 75% of the box ram
+
+    - Be fairly straightforward, very simple and good at this one job
+
+What this program will not do:
+
+    - It is not a complete reference for the hprof format, that can be found in
+      the JVM sourcebase as well as (google for it) the hprof_b_spec.h file.
+
+    - Work in any way as a javaagent, this program is a pathologist only he
+      looks at the corpse of the program.
+
+    - Be scriptable or usable as a general heap extraction program, if you want
+      that go download the eclipse tools, or yourkit they will serve you far
+      better.
+
+    - Read Hprof profiling dumps.
+
+    - Be in any fashion an example of good C ... its been a long time since I
+      wrote C and its probably crappy.
+
