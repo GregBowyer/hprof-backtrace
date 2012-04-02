@@ -1,0 +1,2 @@
+[   ] Proper error reporting everywhere for fseek, fread etc
+[   ] Abstract out all of the fread / BE converstion bullshit
