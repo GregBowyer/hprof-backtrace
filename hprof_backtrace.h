@@ -27,19 +27,19 @@ typedef enum {
 } hprof_tag;
 
 typedef enum {
-    GC_ROOT_UNKNOWN       = 0xFF,
-    GC_ROOT_JNI_GLOBAL    = 0x01,
-    GC_ROOT_JNI_LOCAL     = 0x02,
-    GC_ROOT_JAVA_FRAME    = 0x03,
-    GC_ROOT_NATIVE_STACK  = 0x04,
-    GC_ROOT_STICKY_CLASS  = 0x05,
-    GC_ROOT_THREAD_BLOCK  = 0x06,
-    GC_ROOT_MONITOR_USED  = 0x07,
-    GC_ROOT_THREAD_OBJ    = 0x08,
-    GC_CLASS_DUMP         = 0x20,
-    GC_INSTANCE_DUMP      = 0x21,
-    GC_OBJ_ARRAY_DUMP     = 0x22,
-    GC_PRIM_ARRAY_DUMP    = 0x23
+    ROOT_UNKNOWN       = 0xFF,
+    ROOT_JNI_GLOBAL    = 0x01,
+    ROOT_JNI_LOCAL     = 0x02,
+    ROOT_JAVA_FRAME    = 0x03,
+    ROOT_NATIVE_STACK  = 0x04,
+    ROOT_STICKY_CLASS  = 0x05,
+    ROOT_THREAD_BLOCK  = 0x06,
+    ROOT_MONITOR_USED  = 0x07,
+    ROOT_THREAD_OBJ    = 0x08,
+    CLASS_DUMP         = 0x20,
+    INSTANCE_DUMP      = 0x21,
+    OBJ_ARRAY_DUMP     = 0x22,
+    PRIM_ARRAY_DUMP    = 0x23
 } hprof_gc_tag;
 
 typedef enum {
@@ -67,5 +67,12 @@ typedef struct {
     u4 remaining_bytes;
     //[u1]* body of record
 } hprof_record_header;
+
+typedef struct {
+    u4 live_bytes;
+    u4 live_instances;
+    u8 allocated_bytes;
+    u8 allocated_instances;
+} hprof_heap_summary;
 
 #endif
