@@ -75,4 +75,11 @@ typedef struct {
     u8 allocated_instances;
 } hprof_heap_summary;
 
+typedef struct {
+    u4 serial_number;
+    u4 thread_number;
+    u4 number_frames;
+    //[id]* frame ids
+} hprof_stacktrace;
+
 #endif

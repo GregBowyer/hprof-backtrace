@@ -135,7 +135,27 @@ int main(int argc, char** argv) {
                 break;
             case TRACE:
                 printf("TRACE\n");
-                fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
+                hprof_stacktrace* stacktrace = calloc(1, sizeof(hprof_stacktrace));
+
+                fread(&stacktrace->serial_number, sizeof(u4), 1, hprof_fp);
+                fread(&stacktrace->thread_number, sizeof(u4), 1, hprof_fp);
+                fread(&stacktrace->number_frames, sizeof(u4), 1, hprof_fp);
+
+                printf("StackTrace serial_num=%ju "
+                       "thread_num=%ju num_frames=%ju\n",
+                       (uintmax_t) be32_to_native(stacktrace->serial_number),
+                       (uintmax_t) be32_to_native(stacktrace->thread_number),
+                       (uintmax_t) be32_to_native(stacktrace->number_frames));
+
+                for (int i=0; i < be32_to_native(stacktrace->number_frames); i++) {
+                    // NOT PORTABLE, ident is word_sized (typically)
+                    u8 frame_id;
+                    fread(&frame_id, sizeof(u8), 1, hprof_fp);
+                    printf("FrameID=%ju\n", (uintmax_t) be64_to_native(frame_id));
+                }
+
+                free(stacktrace);
+
                 break;
             case ALLOC_SITES:
                 printf("ALLOC_SITES\n");
