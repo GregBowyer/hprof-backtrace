@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <sys/types.h>
 
+#include "skiplist.h"
 #include "hprof_backtrace.h"
 #include "swab.h"
 
@@ -20,6 +21,62 @@ int read_record_header(hprof_record_header* record_header, FILE* hprof_fp) {
     count += fread(&record_header->profiling_ms, sizeof(u4), 1, hprof_fp);
     count += fread(&record_header->remaining_bytes, sizeof(u4), 1, hprof_fp);
     return !(count == 3);
+}
+
+int __true_cmp(id lhs, id rhs) {
+  if (lhs > rhs) {
+    return SKIPLIST_CMP_GT;
+  } else if (lhs == rhs) {
+    return SKIPLIST_CMP_EQ;
+  } else {
+    return SKIPLIST_CMP_LT;
+  }
+}
+
+skiplist_cmp_t stringtable_cmp(const void *list_value, const void *user_value) {
+    const hprof_utf8 *l = list_value;
+    const hprof_utf8 *v = user_value;
+    return __true_cmp(l->id, v->id);
+}
+
+skiplist_cmp_t stringtable_search(const void *list_value, const void *search_value) {
+    const hprof_utf8 *l = list_value;
+    const id to_find = *(id*) search_value;
+    return __true_cmp(l->id, to_find);
+}
+
+void stringtable_destroy(void *value) {
+    free(value);
+}
+
+/**
+ * Caller is responsible for free() on the returned pointer
+ * returns NULL is a missing id, or failure to craft a string (malloc)
+ */
+char* read_string(id str_id, skiplist_t *string_table, FILE *fp) {
+    const hprof_utf8 *utf8 = skiplist_search(string_table, &str_id);
+    if(utf8 == NULL) {
+        // NOT FOUND
+        return NULL;
+    }
+
+    // Filthy trick, use calloc with an extra char and we get the
+    // null terminator for free, its probably safer from the buffer
+    // overrun perspective to use asnprintf
+    char *to_return = calloc(utf8->num_chars + 1, sizeof(char));
+    if (to_return == NULL) {
+        return NULL;
+    }
+
+    long curr_pos = ftell(fp);
+    fseek(fp, utf8->hprof_offset, SEEK_SET);
+    size_t num_read = fread(to_return, sizeof(char), utf8->num_chars, fp);
+    if (num_read != utf8->num_chars) {
+        return NULL;
+    }
+    fseek(fp, curr_pos, SEEK_SET);
+
+    return to_return;
 }
 
 void decode_gc_tag(hprof_gc_tag gc_tag) {
@@ -99,6 +156,16 @@ int main(int argc, char** argv) {
     hprof_record_header* record_header = calloc(1, sizeof(hprof_record_header));
     hprof_heap_summary* heap_summary = calloc(1, sizeof(hprof_heap_summary));
 
+    // The string table is a skip list that should give us
+    // O(n log n) insertion and O(log n) lookup, This is not as 
+    // good as a malloc'd array, but does not suffer from the
+    // out of order issues that the string id's present us with
+    skiplist_t *string_table = malloc(sizeof(skiplist_t));
+    skiplist_init(string_table);
+    skiplist_set_cmp_fn(string_table, stringtable_cmp);
+    skiplist_set_search_fn(string_table, stringtable_search);
+    skiplist_set_destroy_fn(string_table, stringtable_destroy);
+
     while(1) {
         if (feof(hprof_fp)) {
             break;
@@ -106,20 +173,31 @@ int main(int argc, char** argv) {
 
         read_record_header(record_header, hprof_fp);
 
-        printf("pos=%lu\n", ftell(hprof_fp));
-        printf("Tag=%ju\n", (uintmax_t) record_header->tag);
+        //printf("pos=%lu\n", ftell(hprof_fp));
+        //printf("Tag=%ju\n", (uintmax_t) record_header->tag);
         switch(record_header->tag) {
             case UTF8:
                 printf("UTF8\n");
-                u8 id;
-                fread(&id, sizeof(u8), 1, hprof_fp);
-                size_t num_chars = 
-                    be32_to_native(record_header->remaining_bytes) - sizeof(u8) / sizeof(char);
+                hprof_utf8 *utf8 = malloc(sizeof(hprof_utf8));
+                fread(&utf8->id, sizeof(id), 1, hprof_fp);
+                int bytes_remain = be32_to_native(record_header->remaining_bytes) - sizeof(id);
+
+                // Awesome, hprof strings are utf8, this is good ! the only established
+                // C type is char and its a byte wide :D
+                utf8->num_chars = bytes_remain / sizeof(char);
+                utf8->hprof_offset = ftell(hprof_fp);
+
+                skiplist_insert(string_table, utf8);
+
+                fseek(hprof_fp, bytes_remain, SEEK_CUR);
+
+                /*
                 char* name = calloc(num_chars + 1, sizeof(char));
                 fread(name, sizeof(char), num_chars, hprof_fp);
-                printf("%s\n", name);
+                //printf("%s\n", name);
+                printf("%ju\n", (uintmax_t) be64_to_native(id));
                 free(name);
-                //fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
+                */
                 break;
             case LOAD_CLASS:
                 printf("LOAD_CLASS\n");
@@ -131,7 +209,50 @@ int main(int argc, char** argv) {
                 break;
             case FRAME:
                 printf("FRAME\n");
-                fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
+                
+                // This is bad !!! If it is slow think about doing two complete passes to 
+                // make all the I/O as sequential as possible
+                // This implementation is going to jump all over the hprof file
+                long curr_pos = ftell(hprof_fp);
+                id ids[4];
+                fread(&ids, sizeof(id), 4, hprof_fp);
+
+                char *method_name = read_string(ids[1], string_table, hprof_fp);
+                char *method_sig = read_string(ids[2], string_table, hprof_fp);
+                char *source_file = read_string(ids[3], string_table, hprof_fp);
+
+                method_name = (method_name == NULL) ? "<UNKNOWN_METHOD>"     : method_name;
+                method_sig  = (method_sig  == NULL) ? "<UNKNOWN_METHOD_SIG>" : method_sig;
+                source_file = (source_file == NULL) ? "<UNKNOWN_SOURCE>"     : source_file;
+
+                // SOMETIMES NULL
+                //printf("%s\n", read_string(ids[3], string_table, hprof_fp));
+                
+                u4 class_serial_num;
+                fread(&class_serial_num, sizeof(u4), 1, hprof_fp);
+                i4 line_num;
+                fread(&line_num, sizeof(i4), 1, hprof_fp);
+                line_num = be32_to_native(line_num);
+
+                switch(line_num) {
+                    case -1:
+                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ <UNKNOWN>\n",
+                                (uintmax_t) class_serial_num, method_name, source_file);
+                        break;
+                    case -2:
+                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ <COMPILED_METHOD>\n",
+                                (uintmax_t) class_serial_num, method_name, source_file);
+                        break;
+                    case -3:
+                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ <NATIVE_METHOD>\n",
+                                (uintmax_t) class_serial_num, method_name, source_file);
+                        break;
+                    default:
+                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ %ji\n",
+                                (uintmax_t) class_serial_num, method_name, source_file, (intmax_t) line_num);
+                        break;
+                }
+
                 break;
             case TRACE:
                 printf("TRACE\n");
@@ -148,9 +269,8 @@ int main(int argc, char** argv) {
                        (uintmax_t) be32_to_native(stacktrace->number_frames));
 
                 for (int i=0; i < be32_to_native(stacktrace->number_frames); i++) {
-                    // NOT PORTABLE, ident is word_sized (typically)
-                    u8 frame_id;
-                    fread(&frame_id, sizeof(u8), 1, hprof_fp);
+                    id frame_id;
+                    fread(&frame_id, sizeof(id), 1, hprof_fp);
                     printf("FrameID=%ju\n", (uintmax_t) be64_to_native(frame_id));
                 }
 
@@ -218,6 +338,9 @@ int main(int argc, char** argv) {
 
         //printf("%lu\n", ftell(hprof_fp));
     }
+
+    skiplist_destroy(string_table);
+    free(string_table);
 
     fclose(hprof_fp);
     return 0;

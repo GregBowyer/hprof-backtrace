@@ -9,6 +9,10 @@ typedef uint8_t u1;
 typedef uint32_t u4;
 typedef uint64_t u8;
 
+typedef int32_t i4;
+
+typedef int64_t id;
+
 typedef enum {
     UTF8                    = 0x01,
     LOAD_CLASS              = 0x02,
@@ -81,5 +85,20 @@ typedef struct {
     u4 number_frames;
     //[id]* frame ids
 } hprof_stacktrace;
+
+typedef struct {
+    char* id;
+    char* method_name;
+    char* method_signature;
+    char* source_file;
+    u4 serial_number;
+    i4 line_number;
+} hprof_frame;
+
+typedef struct {
+    id id;
+    size_t num_chars; // NOT IN SPEC, Implementation detail !
+    long hprof_offset; // NOT IN SPEC, Implementation detail !
+} hprof_utf8;
 
 #endif
