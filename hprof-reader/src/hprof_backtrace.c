@@ -9,6 +9,8 @@
 #include "hprof_backtrace.h"
 #include "swab.h"
 
+#include "libpack.h"
+
 void die(int check, char* message) {
     if (check) {
         printf("%s\n", message);
@@ -171,7 +173,14 @@ int main(int argc, char** argv) {
             break;
         }
 
-        read_record_header(record_header, hprof_fp);
+        //read_record_header(record_header, hprof_fp);
+        funpack(hprof_fp, "bd>d>",
+            &record_header->tag,
+            &record_header->profiling_ms,
+            &record_header->remaining_bytes);
+
+        // libpack attempt
+
 
         //printf("pos=%lu\n", ftell(hprof_fp));
         //printf("Tag=%ju\n", (uintmax_t) record_header->tag);

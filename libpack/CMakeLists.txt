@@ -3,6 +3,7 @@ CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
 INCLUDE_DIRECTORIES(./include)
 
 ADD_LIBRARY(pack STATIC
+    src/file.c
     src/pack.c
     src/parse.c
     src/stream.c
