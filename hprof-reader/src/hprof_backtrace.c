@@ -47,7 +47,19 @@ skiplist_cmp_t stringtable_search(const void *list_value, const void *search_val
     return __true_cmp(l->id, to_find);
 }
 
-void stringtable_destroy(void *value) {
+skiplist_cmp_t classtable_cmp(const void *list_value, const void *user_value) {
+    const hprof_load_class *l = list_value;
+    const hprof_load_class *v = user_value;
+    return __true_cmp(l->serial_number, v->serial_number);
+}
+
+skiplist_cmp_t classtable_search(const void *list_value, const void *search_value) {
+    const hprof_load_class *l = list_value;
+    const u4 to_find = *(u4*) search_value;
+    return __true_cmp(l->serial_number, to_find);
+}
+
+void __destroy(void *value) {
     free(value);
 }
 
@@ -166,7 +178,13 @@ int main(int argc, char** argv) {
     skiplist_init(string_table);
     skiplist_set_cmp_fn(string_table, stringtable_cmp);
     skiplist_set_search_fn(string_table, stringtable_search);
-    skiplist_set_destroy_fn(string_table, stringtable_destroy);
+    skiplist_set_destroy_fn(string_table, __destroy);
+
+    skiplist_t *class_table = malloc(sizeof(skiplist_t));
+    skiplist_init(class_table);
+    skiplist_set_cmp_fn(class_table, classtable_cmp);
+    skiplist_set_search_fn(class_table, classtable_search);
+    skiplist_set_destroy_fn(class_table, __destroy);
 
     while(1) {
         if (feof(hprof_fp)) {
@@ -179,17 +197,16 @@ int main(int argc, char** argv) {
             &record_header->profiling_ms,
             &record_header->remaining_bytes);
 
-        // libpack attempt
-
-
-        //printf("pos=%lu\n", ftell(hprof_fp));
         //printf("Tag=%ju\n", (uintmax_t) record_header->tag);
         switch(record_header->tag) {
             case UTF8:
-                printf("UTF8\n");
+                //printf("UTF8\n");
+                ;
                 hprof_utf8 *utf8 = malloc(sizeof(hprof_utf8));
-                fread(&utf8->id, sizeof(id), 1, hprof_fp);
-                int bytes_remain = be32_to_native(record_header->remaining_bytes) - sizeof(id);
+                
+                funpack(hprof_fp, "q>", &utf8->id);
+                //fread(&utf8->id, sizeof(id), 1, hprof_fp);
+                long bytes_remain = record_header->remaining_bytes - sizeof(id);
 
                 // Awesome, hprof strings are utf8, this is good ! the only established
                 // C type is char and its a byte wide :D
@@ -199,72 +216,86 @@ int main(int argc, char** argv) {
                 skiplist_insert(string_table, utf8);
 
                 fseek(hprof_fp, bytes_remain, SEEK_CUR);
-
-                /*
-                char* name = calloc(num_chars + 1, sizeof(char));
-                fread(name, sizeof(char), num_chars, hprof_fp);
-                //printf("%s\n", name);
-                printf("%ju\n", (uintmax_t) be64_to_native(id));
-                free(name);
-                */
                 break;
             case LOAD_CLASS:
-                printf("LOAD_CLASS\n");
-                fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
+                //printf("LOAD_CLASS\n");
+                ;
+
+                hprof_load_class *class = malloc(sizeof(hprof_load_class));
+                fread(&class->serial_number, sizeof(u4), 1, hprof_fp);
+                class->serial_number = be32_to_native(class->serial_number);
+                fseek(hprof_fp, sizeof(id) + sizeof(u4), SEEK_CUR);
+                fread(&class->name_id, sizeof(id), 1, hprof_fp);
+                class->name_id = be64_to_native(class->name_id);
+
+                skiplist_insert(class_table, class);
+                //fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case UNLOAD_CLASS:
-                printf("UNLOAD_CLASS\n");
-                fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
+                //printf("UNLOAD_CLASS\n");
+                fseek(hprof_fp, record_header->remaining_bytes, SEEK_CUR);
                 break;
             case FRAME:
-                printf("FRAME\n");
+                //printf("FRAME\n");
                 
                 // This is bad !!! If it is slow think about doing two complete passes to 
                 // make all the I/O as sequential as possible
                 // This implementation is going to jump all over the hprof file
+
+                ;
                 long curr_pos = ftell(hprof_fp);
                 id ids[4];
                 fread(&ids, sizeof(id), 4, hprof_fp);
 
-                char *method_name = read_string(ids[1], string_table, hprof_fp);
-                char *method_sig = read_string(ids[2], string_table, hprof_fp);
-                char *source_file = read_string(ids[3], string_table, hprof_fp);
-
-                method_name = (method_name == NULL) ? "<UNKNOWN_METHOD>"     : method_name;
-                method_sig  = (method_sig  == NULL) ? "<UNKNOWN_METHOD_SIG>" : method_sig;
-                source_file = (source_file == NULL) ? "<UNKNOWN_SOURCE>"     : source_file;
-
-                // SOMETIMES NULL
-                //printf("%s\n", read_string(ids[3], string_table, hprof_fp));
-                
                 u4 class_serial_num;
                 fread(&class_serial_num, sizeof(u4), 1, hprof_fp);
+                class_serial_num = be32_to_native(class_serial_num);
+                hprof_load_class *clazz = (hprof_load_class*) skiplist_search(class_table, &class_serial_num);
+
                 i4 line_num;
                 fread(&line_num, sizeof(i4), 1, hprof_fp);
                 line_num = be32_to_native(line_num);
 
+                char *method_name = read_string(be64_to_native(ids[1]), string_table, hprof_fp);
+                char *method_sig  = read_string(be64_to_native(ids[2]), string_table, hprof_fp);
+                char *source_file = read_string(be64_to_native(ids[3]), string_table, hprof_fp);
+
+                char *class_name = "<UNKNOWN_CLASS>";
+                if(clazz != NULL) {
+                    class_name = read_string(clazz->name_id, string_table, hprof_fp);
+                }
+
+                // SOMETIMES NULL
+                //printf("%s\n", read_string(ids[3], string_table, hprof_fp));
+                
+                class_name  = (class_name  == NULL) ? "<UNKNOWN_CLASS>"      : class_name;
+                method_name = (method_name == NULL) ? "<UNKNOWN_METHOD>"     : method_name;
+                method_sig  = (method_sig  == NULL) ? "<UNKNOWN_METHOD_SIG>" : method_sig;
+                source_file = (source_file == NULL) ? "<UNKNOWN_SOURCE>"     : source_file;
+
                 switch(line_num) {
                     case -1:
-                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ <UNKNOWN>\n",
-                                (uintmax_t) class_serial_num, method_name, source_file);
+                        printf("Class %s\n \tMethod=%s\n\tSource=%s @ <UNKNOWN>\n",
+                                class_name, method_name, source_file);
                         break;
                     case -2:
-                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ <COMPILED_METHOD>\n",
-                                (uintmax_t) class_serial_num, method_name, source_file);
+                        printf("Class %s\n \tMethod=%s\n\tSource=%s @ <COMPILED_METHOD>\n",
+                                class_name, method_name, source_file);
                         break;
                     case -3:
-                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ <NATIVE_METHOD>\n",
-                                (uintmax_t) class_serial_num, method_name, source_file);
+                        printf("Class %s\n \tMethod=%s\n\tSource=%s @ <NATIVE_METHOD>\n",
+                                class_name, method_name, source_file);
                         break;
                     default:
-                        printf("Class (TODO String table lookup) %ju\n \tMethod=%s\n\tSource=%s @ %ji\n",
-                                (uintmax_t) class_serial_num, method_name, source_file, (intmax_t) line_num);
+                        printf("Class %s\n \tMethod=%s\n\tSource=%s @ %ji\n",
+                                class_name, method_name, source_file, (intmax_t) line_num);
                         break;
                 }
 
                 break;
             case TRACE:
-                printf("TRACE\n");
+                //printf("TRACE\n");
+                ;
                 hprof_stacktrace* stacktrace = calloc(1, sizeof(hprof_stacktrace));
 
                 fread(&stacktrace->serial_number, sizeof(u4), 1, hprof_fp);
@@ -273,9 +304,9 @@ int main(int argc, char** argv) {
 
                 printf("StackTrace serial_num=%ju "
                        "thread_num=%ju num_frames=%ju\n",
-                       (uintmax_t) be32_to_native(stacktrace->serial_number),
-                       (uintmax_t) be32_to_native(stacktrace->thread_number),
-                       (uintmax_t) be32_to_native(stacktrace->number_frames));
+                       (uintmax_t) be64_to_native(stacktrace->serial_number),
+                       (uintmax_t) be64_to_native(stacktrace->thread_number),
+                       (uintmax_t) be64_to_native(stacktrace->number_frames));
 
                 for (int i=0; i < be32_to_native(stacktrace->number_frames); i++) {
                     id frame_id;
@@ -287,11 +318,11 @@ int main(int argc, char** argv) {
 
                 break;
             case ALLOC_SITES:
-                printf("ALLOC_SITES\n");
+                //printf("ALLOC_SITES\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case HEAP_SUMMARY:
-                printf("HEAP SUMMARY\n");
+                //printf("HEAP SUMMARY\n");
                 fread(&heap_summary->live_bytes, sizeof(u4), 1, hprof_fp);
                 fread(&heap_summary->live_instances, sizeof(u4), 1, hprof_fp);
                 fread(&heap_summary->allocated_bytes, sizeof(u8), 1, hprof_fp);
@@ -306,36 +337,31 @@ int main(int argc, char** argv) {
                        (uintmax_t) be64_to_native(heap_summary->allocated_instances));
                 break;
             case START_THREAD:
-                printf("START_THREAD\n");
+                //printf("START_THREAD\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case END_THREAD:
-                printf("END_THREAD\n");
+                //printf("END_THREAD\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case HEAP_DUMP:
-                printf("HEAP_DUMP\n");
+                //printf("HEAP_DUMP\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case CPU_SAMPLES:
-                printf("CPU_SAMPLES\n");
+                //printf("CPU_SAMPLES\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case CONTROL_SETTINGS:
-                printf("CONTROL_SETTINGS\n");
+                //printf("CONTROL_SETTINGS\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case HEAP_DUMP_SEGMENT:
-                printf("HEAP_DUMP_SEGMENT\n");
-                /*
-                u1* gc_tag = calloc(1, sizeof(u1));
-                fread(&gc_tag, sizeof(u1), 1, hprof_fp);
-                decode_gc_tag(*gc_tag);
-                */
+                //printf("HEAP_DUMP_SEGMENT\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 break;
             case HEAP_DUMP_END:
-                printf("HEAP_DUMP_END\n");
+                //printf("HEAP_DUMP_END\n");
                 fseek(hprof_fp, be32_to_native(record_header->remaining_bytes), SEEK_CUR);
                 exit(1);
                 break;
@@ -350,6 +376,9 @@ int main(int argc, char** argv) {
 
     skiplist_destroy(string_table);
     free(string_table);
+
+    skiplist_destroy(class_table);
+    free(class_table);
 
     fclose(hprof_fp);
     return 0;

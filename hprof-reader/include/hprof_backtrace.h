@@ -108,6 +108,13 @@ typedef struct {
 } hprof_frame;
 
 typedef struct {
+    u4 serial_number;
+    //id object_id;
+    //u4 stack_trace_serial_num;
+    id name_id;
+} hprof_load_class;
+
+typedef struct {
     id id;
     size_t num_chars; // NOT IN SPEC, Implementation detail !
     long hprof_offset; // NOT IN SPEC, Implementation detail !
