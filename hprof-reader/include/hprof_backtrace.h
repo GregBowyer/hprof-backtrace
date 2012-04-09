@@ -3,14 +3,26 @@
 
 #include <stdint.h>
 
-// This is what the documentation refers to
-// *Endieness unknown, assume native*
-typedef uint8_t u1;
+// These types are in the spec for hprof
+// to make it slightly easier I am using the same names
+typedef uint8_t  u1;
 typedef uint32_t u4;
 typedef uint64_t u8;
-
 typedef int32_t i4;
 
+/*
+ The ID in hprof is actually defined in the header of
+ the dump, there it is claimed that the ID is *typically*
+ the word size of the machine
+ 
+ ... as a result we assume that this is 64bits wide, since
+ there are few machines that have a pointer larger than this
+ This does mean that we must be careful when writing to this
+ to ensure that:
+    a) it is zeroed out
+    b) we write to it such that if the id is 32bits, its the 
+       lower 32bits of the 64bits declared here
+*/
 typedef int64_t id;
 
 typedef enum {

@@ -1,0 +1,73 @@
+Integer Types
+=============
+
+
+  Template		Stream bits	Variable
+  sgn	unsign				pack		unpack
+
+Portable sizes:
+  n<n>			<n>		int<n>_t	int<n>_t*
+	u<n>		<n>		uint<n>_t	uint<n>_t*
+
+Where <n> is a decimal number - 8, 16, 32, or 64
+
+Shortcuts
+  b	B		8
+  w	W		16
+  d	D		32
+  q	Q		64
+
+Types beyond 8 bits must be followed by a specifier of endianness:
+  w<		little endian
+  w>		big endian
+
+Platform sizes:
+  c	C		8		char		char*
+  s	S		?		short		short*
+  i	I		?		int		int*
+  l	L		?		long		long*
+[TODO: some format code for long long?]
+
+
+Forming arrays:
+===============
+
+"t" stands for the template character for any basic type, and "T" for the
+associated variable type it is packed from. "n" stands for a positive decimal
+integer embedded in the template itself. "t'" stands for the template character
+of any unsigned integer type.
+
+  Template		Variables
+  			pack			unpack
+
+Fixed-size; size in template:
+  t[n]			T*			T*
+
+Fixed-size; size as an extra variable:
+  t[]			T*, int			T*, int
+
+Variable-size; size embedded in the stream:
+  t[t']			T*, int			T*, int*
+
+In the unpack case, the int* parameter must be initialised to the size the
+buffer can hold. On return, it will be filled with the number of elements
+actually stored in the array.
+
+Variable-size; size embedded in the stream; allocated array:
+  t[t']#		T*, int			T**, int*
+
+In the unpack case, the T** parameter will be set to the address of a newly-
+allocated buffer containing the elements, the int* parameter will be set to
+the number of elements. Neither parameter needs to be initialised on entry.
+
+
+Common Notation
+===============
+
+
+  t4			equivalent to		t t t t
+
+  t?	on unpack:		read a 't' from the stream but throw away the
+  				result
+  	on pack	to string:	skip output bytes, no change
+  		to stream:	seek or die
